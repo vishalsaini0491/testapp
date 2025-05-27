@@ -1,12 +1,12 @@
 // All SQLite operations for user, task, and agent history management are handled here.
 
-import { CapacitorSQLite, SQLiteConnection } from '@capacitor-community/sqlite';
+import { CapacitorSQLite, SQLiteConnection } from "@capacitor-community/sqlite";
 
 // Create a new SQLite connection instance
 const sqlite = new SQLiteConnection(CapacitorSQLite);
 
 // Define database name
-const dbName = 'usersdb';
+const dbName = "usersdb";
 
 /**
  * Initialize SQLite if available
@@ -24,8 +24,9 @@ export const initSQLite = async () => {
  * Opens a connection to the database
  */
 export const openDB = async () => {
-  const db = await sqlite.createConnection(dbName, false, 'no-encryption', 1);
+  const db = await sqlite.createConnection(dbName, false, "no-encryption", 1);
   await db.open();
+  await db.execute(`PRAGMA foreign_keys = ON;`);
   return db;
 };
 
@@ -50,9 +51,9 @@ export const createTables = async (db) => {
     );
   `);
 
-  // Agent History Table
+  // Activity Log Table
   await db.execute(`
-    CREATE TABLE IF NOT EXISTS agent_history (
+    CREATE TABLE IF NOT EXISTS activity_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       log TEXT DEFAULT 'login successful',
@@ -63,17 +64,49 @@ export const createTables = async (db) => {
   // Tasks Table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS tasks (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       title TEXT NOT NULL,
       description TEXT,
       is_completed INTEGER DEFAULT 0,
       due_date DATETIME,
+      vector_embedding BLOB,
+      priority INTEGER DEFAULT 3,
+      parent_task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
+
     );
   `);
+
+  await db.execute(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER REFERENCES Users(id),
+    message TEXT NOT NULL,
+    type TEXT NOT NULL,         -- e.g., 'reminder', 'assignment', 'system'
+    related_id INTEGER,         -- e.g., task_id for task-related notifications
+    read_status INTEGER DEFAULT 0,  -- 0 = unread, 1 = read
+    scheduled_for DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+  await db.execute(`
+  CREATE TABLE IF NOT EXISTS completed_tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES Users(id),
+  due_date DATETIME REFERENCES tasks(due_date),
+  title TEXT,
+  description TEXT,
+  vector_embedding BLOB,
+  completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  source_task_id INTEGER,         -- Reference to original task if needed
+  parent_task_id INTEGER,
+  created_at DATETIME REFERENCES tasks(created_at),
+  FOREIGN KEY (user_id) REFERENCES Users(id) ON DELETE CASCADE
+);
+`);
 };
 
 /**
@@ -94,12 +127,12 @@ export const saveUserToDB = async (username, email, password) => {
 /**
  * Fetches all users from the database
  */
-export const fetchAllUsers = async () => {
-  const db = await openDB();
-  const result = await db.query(`SELECT * FROM Users`);
-  await closeDB();
-  return result.values || [];
-};
+// export const fetchAllUsers = async () => {
+//   const db = await openDB();
+//   const result = await db.query(`SELECT * FROM Users`);
+//   await closeDB();
+//   return result.values || [];
+// };
 
 /**
  * Logs in the user if credentials match
@@ -126,16 +159,16 @@ export const loginUser = async (email, password) => {
     if (history.values.length > 0) {
       // Already has a log; don't add again
       const log = history.values[0].log;
-      await db.run(
-        `UPDATE agent_history SET log = ? WHERE user_id = ?`,
-        [log, user.id]
-      );
+      await db.run(`UPDATE agent_history SET log = ? WHERE user_id = ?`, [
+        log,
+        user.id,
+      ]);
     } else {
       // First login; insert log
-      await db.run(
-        `INSERT INTO agent_history (user_id, log) VALUES (?, ?)`,
-        [user.id, 'Login successful']
-      );
+      await db.run(`INSERT INTO agent_history (user_id, log) VALUES (?, ?)`, [
+        user.id,
+        "Login successful",
+      ]);
     }
   }
 
@@ -147,13 +180,29 @@ export const loginUser = async (email, password) => {
  * Adds a task for a specific user
  * Also appends the action to agent history
  */
-export const addTaskToDB = async (userId, title, description, dueDate) => {
+export const addTaskToDB = async (
+  userId,
+  title,
+  description,
+  dueDate,
+  priority = 3,
+  parentTaskId = null,
+  vectorEmbedding = null
+) => {
   const db = await openDB();
   await createTables(db);
 
   await db.run(
-    `INSERT INTO tasks (user_id, title, description, due_date) VALUES (?, ?, ?, ?)`,
-    [userId, title, description, dueDate]
+    `INSERT INTO tasks (user_id, title, description, due_date, priority, parent_task_id, vector_embedding) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      title,
+      description,
+      dueDate,
+      priority,
+      parentTaskId,
+      vectorEmbedding,
+    ]
   );
 
   // Log to agent history
@@ -165,15 +214,15 @@ export const addTaskToDB = async (userId, title, description, dueDate) => {
   const taskLog = `\nTask added by user ${userId}`;
   if (history.values.length > 0) {
     const currentLog = history.values[0].log;
-    await db.run(
-      `UPDATE agent_history SET log = ? WHERE user_id = ?`,
-      [currentLog + taskLog, userId]
-    );
+    await db.run(`UPDATE agent_history SET log = ? WHERE user_id = ?`, [
+      currentLog + taskLog,
+      userId,
+    ]);
   } else {
-    await db.run(
-      `INSERT INTO agent_history (user_id, log) VALUES (?, ?)`,
-      [userId, taskLog]
-    );
+    await db.run(`INSERT INTO agent_history (user_id, log) VALUES (?, ?)`, [
+      userId,
+      taskLog,
+    ]);
   }
 
   await closeDB();
@@ -182,12 +231,35 @@ export const addTaskToDB = async (userId, title, description, dueDate) => {
 /**
  * Updates a task and logs the update in history
  */
-export const updateTaskInDB = async (userId, taskId, newTitle, newDesc) => {
+export const updateTaskInDB = async (
+  userId,
+  taskId,
+  newTitle,
+  newDesc,
+  newDueDate = null,
+  newPriority = null,
+  newParentTaskId = null,
+  newVectorEmbedding = null
+) => {
   const db = await openDB();
 
   await db.run(
-    `UPDATE tasks SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    [newTitle, newDesc, taskId]
+    `UPDATE tasks
+     SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP,
+         due_date = COALESCE(?, due_date),
+         priority = COALESCE(?, priority),
+         parent_task_id = COALESCE(?, parent_task_id),
+         vector_embedding = COALESCE(?, vector_embedding)
+     WHERE id = ?`,
+    [
+      newTitle,
+      newDesc,
+      newDueDate,
+      newPriority,
+      newParentTaskId,
+      newVectorEmbedding,
+      taskId,
+    ]
   );
 
   const history = await db.query(
@@ -198,15 +270,15 @@ export const updateTaskInDB = async (userId, taskId, newTitle, newDesc) => {
   const updateLog = `Task updated by user ${userId}`;
   if (history.values.length > 0) {
     const currentLog = history.values[0].log;
-    await db.run(
-      `UPDATE agent_history SET log = ? WHERE user_id = ?`,
-      [currentLog + updateLog, userId]
-    );
+    await db.run(`UPDATE agent_history SET log = ? WHERE user_id = ?`, [
+      currentLog + "\n" + updateLog,
+      userId,
+    ]);
   } else {
-    await db.run(
-      `INSERT INTO agent_history (user_id, log) VALUES (?, ?)`,
-      [userId, updateLog]
-    );
+    await db.run(`INSERT INTO agent_history (user_id, log) VALUES (?, ?)`, [
+      userId,
+      updateLog,
+    ]);
   }
 
   await closeDB();
