@@ -15,9 +15,13 @@
     "@capacitor/cli": "^7.2.0",
     "@capacitor/core": "^7.2.0",
     "@capacitor/ios": "^7.2.0",
+<<<<<<< HEAD
     "android": "^0.0.8",
     "ios": "^0.0.1",
     "openai": "^4.103.0",
+=======
+    "bcryptjs": "^3.0.2",
+>>>>>>> f4b1a75a46ea7777b8c1c344b42ba7abb3a8c2ce
     "react": "^19.1.0",
     "react-calendar": "^5.1.0",
     "react-dom": "^19.1.0",
