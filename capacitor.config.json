@@ -1,5 +1,5 @@
 {
-  "appId": "com.testapp.app",
-  "appName": "testapp",
+  "appId": "com.example.app",
+  "appName": "uidesign",
   "webDir": "dist"
 }
