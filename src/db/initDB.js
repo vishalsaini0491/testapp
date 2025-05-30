@@ -171,7 +171,6 @@ export async function getDB() {
     CREATE TABLE IF NOT EXISTS completed_tasks (
     id INTEGER PRIMARY KEY,
     user_id INTEGER REFERENCES Users(id),
-    due_date DATETIME REFERENCES tasks(due_date),
     title TEXT,
     description TEXT,
     priority TEXT, -- e.g., 'low', 'medium', 'high'                         // ******NEW ADDITION*******
