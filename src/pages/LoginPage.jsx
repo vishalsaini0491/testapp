@@ -1,81 +1,176 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import "../styles/LoginStyle.css";
+import { loginUser } from "../db/queries";
 
-export default function LoginPage() {
-  const navigate = useNavigate();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+const palette = {
+  primary: "#582F0E",
+  secondary: "#A68A64",
+  accent: "#582F0E",
+  bg: "#EAEFEF",
+  label: "#A68A64",
+  input: "#A68A64",
+  error: "#ef4444",
+  border: "#B8CFCE",
+  success: "#A68A64",
+};
 
-  const handleLogin = () => {
-    // Dummy validation
-    if (username && password) {
-      navigate('/home');
-    } else {
-      alert('Please enter both username and password');
-    }
-  };
-
+function Field({
+  label,
+  type,
+  name,
+  value,
+  onChange,
+  onFocus,
+  onBlur,
+  autoComplete,
+  error,
+}) {
+  const [focus, setFocus] = useState(false);
   return (
-    <div style={styles.container}>
-      <h2 style={styles.title}>Login</h2>
+    <div className="login-field">
+      <label htmlFor={name} className="login-label">
+        {label}
+      </label>
       <input
-        style={styles.input}
-        type="text"
-        placeholder="Username"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
+        id={name}
+        name={name}
+        type={type}
+        value={value}
+        autoComplete={autoComplete}
+        onChange={onChange}
+        onFocus={(e) => {
+          setFocus(true);
+          onFocus && onFocus(e);
+        }}
+        onBlur={(e) => {
+          setFocus(false);
+          onBlur && onBlur(e);
+        }}
+        className={`login-input${focus ? " focus" : ""}${
+          error ? " error" : ""
+        }`}
       />
-      <input
-        style={styles.input}
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-      />
-      <button style={styles.button} onClick={handleLogin}>Login</button>
-      <p style={styles.text}>
-        Don't have an account?{' '}
-        <span style={styles.link} onClick={() => navigate('/signup')}>Sign Up</span>
-      </p>
     </div>
   );
 }
 
-const styles = {
-  container: {
-    maxWidth: 400,
-    margin: '100px auto',
-    padding: 20,
-    borderRadius: 10,
-    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-    textAlign: 'center',
-    fontFamily: 'Arial, sans-serif',
-  },
-  title: {
-    marginBottom: 20,
-  },
-  input: {
-    width: '100%',
-    padding: 10,
-    margin: '10px 0',
-    borderRadius: 5,
-    border: '1px solid #ccc',
-  },
-  button: {
-    width: '100%',
-    padding: 10,
-    backgroundColor: '#007BFF',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 5,
-    cursor: 'pointer',
-  },
-  text: {
-    marginTop: 15,
-  },
-  link: {
-    color: '#007BFF',
-    cursor: 'pointer',
-    textDecoration: 'underline',
-  },
-};
+function Login({ onSignupClick }) {
+  const [inputs, setInputs] = useState({
+    email: "",
+    password: "",
+  });
+  const [touched, setTouched] = useState({});
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const navigate = useNavigate();
+
+  function validate() {
+    if (!inputs.email.trim()) return "Email is required.";
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(inputs.email))
+      return "Invalid email address.";
+    if (!inputs.password) return "Password is required.";
+    if (inputs.password.length < 6)
+      return "Password must be at least 6 characters.";
+    return "";
+  }
+
+  const handleInput = (e) => {
+    setInputs({ ...inputs, [e.target.name]: e.target.value });
+    setError("");
+    setMessage("");
+  };
+
+  const handleFocus = (e) => setTouched({ ...touched, [e.target.name]: true });
+  const handleBlur = (e) => setTouched({ ...touched, [e.target.name]: true });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    const { email, password } = inputs;
+    const user = await loginUser({ email, password });
+    alert(`${user}`);
+    if (user === 0) {
+      alert("Invalid email or password");
+      return;
+    } else {
+      setTouched({ email: true, password: true });
+      const err = validate();
+      if (err) {
+        setError(err);
+        setMessage("");
+        return;
+      }
+      setLoading(true);
+      setTimeout(() => {
+        setLoading(false);
+        setError("");
+        setMessage("Logged in successfully!");
+        setTimeout(() => {
+          navigate("/home");
+        }, 750);
+      }, 1200);
+    }
+  };
+
+  return (
+    <>
+      <div className="login-header">Login</div>
+      <form autoComplete="off" onSubmit={handleSubmit} noValidate>
+        <Field
+          label="Email"
+          type="email"
+          name="email"
+          value={inputs.email}
+          onChange={handleInput}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          autoComplete="email"
+          error={
+            touched.email &&
+            (!inputs.email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(inputs.email))
+          }
+        />
+        <Field
+          label="Password"
+          type="password"
+          name="password"
+          value={inputs.password}
+          onChange={handleInput}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          autoComplete="current-password"
+          error={
+            touched.password && (!inputs.password || inputs.password.length < 6)
+          }
+        />
+        {error && <div className="login-error">{error}</div>}
+        {message && <div className="login-message">{message}</div>}
+        <button
+          type="submit"
+          className="login-button"
+          disabled={loading}
+          style={{
+            background: loading ? palette.accent : palette.primary,
+          }}
+        >
+          {loading ? "Logging in..." : "Login"}
+        </button>
+      </form>
+      <div className="login-helper">
+        Don’t have an account?{" "}
+        <button
+          type="button"
+          className="login-signup-link"
+          onClick={onSignupClick}
+        >
+          Sign Up
+        </button>
+      </div>
+    </>
+  );
+}
+
+export default Login;
